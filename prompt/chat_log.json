@@ -16,7 +16,15 @@
     "content": "介绍CWRU轴承数据集，给出数据集的获取链接。"
   },
   {
+    "role": "assistant",
+    "content": "推荐在和鲸社区（Heywhale）查找‘轴承振动信号数据集’。数据集链接：https://www.heywhale.com/mw/dataset/69a7d5b64a5a2f8d77925643"
+  },
+  {
     "role": "user",
     "content": "帮我设计振动信号的预处理步骤，包含切片、归一化、数据集划分。"
+  },
+  {
+    "role": "assistant",
+    "content": "预处理步骤包括：1. 对原始振动信号进行小波降噪；2. 提取时域和频域特征；3. 按 7:3 的比例将数据集划分为训练集和测试集；4. 对特征数据进行归一化处理。"
   }
 ]
