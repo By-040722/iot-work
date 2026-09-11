@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}历史记录 - 智能故障诊断系统{% endblock %}
+{% block page_title %}历史记录{% endblock %}
+
+{% block content %}
+<!-- 筛选条件 -->
+<div class="card">
+    <div class="card-title">筛选条件</div>
+    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+        <div class="form-group" style="min-width:180px;">
+            <label class="form-label">故障类型</label>
+            <select class="form-select" id="filterFaultType">
+                <option value="">全部</option>
+                <option value="正常">正常</option>
+                <option value="内圈">内圈故障</option>
+                <option value="外圈">外圈故障</option>
+                <option value="滚动体">滚动体故障</option>
+            </select>
+        </div>
+        <div class="form-group" style="min-width:120px;">
+            <label class="form-label">每页条数</label>
+            <select class="form-select" id="pageSize">
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="50">50</option>
+            </select>
+        </div>
+        <button class="btn btn-primary" id="searchBtn">查询</button>
+        <button class="btn btn-default" id="resetBtn">重置</button>
+    </div>
+</div>
+
+<!-- 记录列表 -->
+<div class="card">
+    <div class="card-title">诊断记录 <span id="recordCount" style="font-size:13px;color:#8c8c8c;font-weight:normal;"></span></div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>文件名</th>
+                    <th>故障类型</th>
+                    <th>置信度</th>
+                    <th>健康度</th>
+                    <th>是否异常</th>
+                    <th>使用模型</th>
+                    <th>信号长度</th>
+                    <th>诊断时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="recordTableBody">
+                <tr><td colspan="10" style="text-align:center;color:#8c8c8c;">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <!-- 分页 -->
+    <div style="margin-top:16px;display:flex;justify-content:space-between;align-items:center;">
+        <div id="pageInfo" style="color:#8c8c8c;font-size:13px;"></div>
+        <div id="pagination" style="display:flex;gap:8px;"></div>
+    </div>
+</div>
+
+<!-- 记录详情弹窗 -->
+<div class="card" id="detailCard" style="display:none;">
+    <div class="card-title">记录详情 <span id="detailId" style="font-size:13px;color:#8c8c8c;font-weight:normal;"></span></div>
+    <div id="detailContent"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+
+async function loadRecords() {
+    const faultType = document.getElementById('filterFaultType').value;
+    const size = parseInt(document.getElementById('pageSize').value);
+    let url = `/api/diagnose/records?page=${currentPage}&size=${size}`;
+    if (faultType) url += `&fault_type=${encodeURIComponent(faultType)}`;
+
+    const result = await apiRequest(url);
+    const tbody = document.getElementById('recordTableBody');
+
+    if (result.success && result.data.records.length > 0) {
+        document.getElementById('recordCount').textContent = `共 ${result.data.total} 条`;
+        tbody.innerHTML = result.data.records.map(r => `
+            <tr>
+                <td>${r.id}</td>
+                <td>${r.file_name}</td>
+                <td>${getFaultTag(r.fault_type)}</td>
+                <td>${(r.confidence * 100).toFixed(1)}%</td>
+                <td>${r.health_score} ${getHealthTag(r.health_score)}</td>
+                <td>${r.is_anomaly ? '<span class="tag tag-danger">异常</span>' : '<span class="tag tag-normal">正常</span>'}</td>
+                <td>${r.model_used}</td>
+                <td>${r.signal_length}</td>
+                <td>${r.created_at}</td>
+                <td>
+                    <button class="btn btn-sm btn-default" onclick="viewDetail(${r.id})">详情</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteRecord(${r.id})">删除</button>
+                </td>
+            </tr>
+        `).join('');
+
+        // 分页信息
+        document.getElementById('pageInfo').textContent = `第 ${result.data.page} / ${result.data.pages} 页，共 ${result.data.total} 条`;
+
+        // 分页按钮
+        const pag = document.getElementById('pagination');
+        let html = '';
+        html += `<button class="btn btn-sm btn-default" ${currentPage <= 1 ? 'disabled' : ''} onclick="goPage(${currentPage - 1})">上一页</button>`;
+        const totalPages = result.data.pages;
+        const start = Math.max(1, currentPage - 2);
+        const end = Math.min(totalPages, currentPage + 2);
+        for (let i = start; i <= end; i++) {
+            html += `<button class="btn btn-sm ${i === currentPage ? 'btn-primary' : 'btn-default'}" onclick="goPage(${i})">${i}</button>`;
+        }
+        html += `<button class="btn btn-sm btn-default" ${currentPage >= totalPages ? 'disabled' : ''} onclick="goPage(${currentPage + 1})">下一页</button>`;
+        pag.innerHTML = html;
+    } else {
+        document.getElementById('recordCount').textContent = '';
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#8c8c8c;">暂无诊断记录</td></tr>';
+        document.getElementById('pageInfo').textContent = '';
+        document.getElementById('pagination').innerHTML = '';
+    }
+}
+
+function goPage(page) {
+    currentPage = page;
+    loadRecords();
+}
+
+document.getElementById('searchBtn').addEventListener('click', () => {
+    currentPage = 1;
+    loadRecords();
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+    document.getElementById('filterFaultType').value = '';
+    document.getElementById('pageSize').value = '20';
+    currentPage = 1;
+    loadRecords();
+});
+
+async function viewDetail(id) {
+    const result = await apiRequest(`/api/diagnose/record/${id}`);
+    if (result.success && result.data) {
+        const r = result.data;
+        document.getElementById('detailCard').style.display = 'block';
+        document.getElementById('detailId').textContent = `- #${r.id}`;
+        let featuresHtml = '';
+        if (r.features) {
+            const fnames = Object.keys(r.features);
+            featuresHtml = '<div style="margin-top:12px;"><strong>特征值：</strong><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;font-size:12px;margin-top:8px;">';
+            fnames.forEach(name => {
+                featuresHtml += `<div>${name}: ${r.features[name]}</div>`;
+            });
+            featuresHtml += '</div></div>';
+        }
+        document.getElementById('detailContent').innerHTML = `
+            <div class="result-grid">
+                <div>
+                    <div class="result-item"><span class="result-label">文件名</span><span class="result-value">${r.file_name}</span></div>
+                    <div class="result-item"><span class="result-label">故障类型</span><span class="result-value">${getFaultTag(r.fault_type)}</span></div>
+                    <div class="result-item"><span class="result-label">置信度</span><span class="result-value">${(r.confidence * 100).toFixed(2)}%</span></div>
+                    <div class="result-item"><span class="result-label">健康度</span><span class="result-value">${r.health_score} ${getHealthTag(r.health_score)}</span></div>
+                </div>
+                <div>
+                    <div class="result-item"><span class="result-label">是否异常</span><span class="result-value">${r.is_anomaly ? '是' : '否'}</span></div>
+                    <div class="result-item"><span class="result-label">异常分数</span><span class="result-value">${(r.anomaly_score * 100).toFixed(2)}%</span></div>
+                    <div class="result-item"><span class="result-label">使用模型</span><span class="result-value">${r.model_used}</span></div>
+                    <div class="result-item"><span class="result-label">诊断时间</span><span class="result-value">${r.created_at}</span></div>
+                </div>
+            </div>
+            ${featuresHtml}
+        `;
+        document.getElementById('detailCard').scrollIntoView({ behavior: 'smooth' });
+    }
+}
+
+async function deleteRecord(id) {
+    if (!confirm('确定要删除该记录吗？')) return;
+    const result = await apiRequest(`/api/diagnose/record/${id}`, { method: 'DELETE' });
+    if (result.success) {
+        showToast('删除成功', 'success');
+        loadRecords();
+    } else {
+        showToast('删除失败', 'error');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadRecords);
+</script>
+{% endblock %}

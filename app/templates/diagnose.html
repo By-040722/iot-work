@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+{% block title %}在线诊断 - 智能故障诊断系统{% endblock %}
+{% block page_title %}在线诊断{% endblock %}
+
+{% block content %}
+<!-- 上传区域 -->
+<div class="card">
+    <div class="card-title">上传振动信号文件</div>
+    <div class="upload-area" id="uploadArea">
+        <div class="upload-icon">📤</div>
+        <div class="upload-text">点击或拖拽文件到此处上传</div>
+        <div class="upload-hint">支持 CSV、TXT 格式，单文件最大 100MB</div>
+        <input type="file" id="fileInput" accept=".csv,.txt" style="display:none;">
+    </div>
+    <div style="margin-top:16px;text-align:center;">
+        <button class="btn btn-primary" id="diagnoseBtn" disabled>
+            <span>开始诊断</span>
+        </button>
+        <button class="btn btn-default" id="clearBtn" style="margin-left:8px;">清除</button>
+    </div>
+    <div id="fileInfo" style="margin-top:12px;text-align:center;color:#595959;display:none;">
+        已选择文件: <span id="fileName" style="color:#1890ff;font-weight:500;"></span>
+    </div>
+</div>
+
+<!-- 诊断结果区域 -->
+<div id="resultArea" style="display:none;">
+    <!-- 诊断结果概览 -->
+    <div class="card">
+        <div class="card-title">诊断结果</div>
+        <div class="result-grid">
+            <div>
+                <div class="result-item">
+                    <span class="result-label">故障类型</span>
+                    <span class="result-value" id="resultFaultType">-</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">置信度</span>
+                    <span class="result-value" id="resultConfidence">-</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">使用模型</span>
+                    <span class="result-value" id="resultModel">-</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">信号长度</span>
+                    <span class="result-value" id="resultSignalLength">-</span>
+                </div>
+                <div class="result-item">
+                    <span class="result-label">采样率</span>
+                    <span class="result-value" id="resultSampleRate">-</span>
+                </div>
+            </div>
+            <div>
+                <div class="health-gauge" id="healthGauge"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 信号可视化 -->
+    <div class="chart-row">
+        <div class="card">
+            <div class="card-title">原始信号波形</div>
+            <div class="chart-container" id="rawWaveformChart"></div>
+        </div>
+        <div class="card">
+            <div class="card-title">预处理后波形</div>
+            <div class="chart-container" id="processedWaveformChart"></div>
+        </div>
+    </div>
+
+    <div class="chart-row">
+        <div class="card">
+            <div class="card-title">频谱图</div>
+            <div class="chart-container" id="spectrumChart"></div>
+        </div>
+        <div class="card">
+            <div class="card-title">各类别概率分布</div>
+            <div class="chart-container" id="probabilityChart"></div>
+        </div>
+    </div>
+
+    <!-- 特征值表格 -->
+    <div class="card">
+        <div class="card-title">提取特征值（41维）</div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>特征名称</th>
+                        <th>特征值</th>
+                        <th>特征名称</th>
+                        <th>特征值</th>
+                    </tr>
+                </thead>
+                <tbody id="featuresTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedFile = null;
+let diagnoseResult = null;
+
+// 上传区域交互
+const uploadArea = document.getElementById('uploadArea');
+const fileInput = document.getElementById('fileInput');
+const diagnoseBtn = document.getElementById('diagnoseBtn');
+const clearBtn = document.getElementById('clearBtn');
+const fileInfo = document.getElementById('fileInfo');
+const fileNameEl = document.getElementById('fileName');
+
+uploadArea.addEventListener('click', () => fileInput.click());
+uploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadArea.classList.add('dragover');
+});
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadArea.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+        handleFile(e.dataTransfer.files[0]);
+    }
+});
+
+fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        handleFile(e.target.files[0]);
+    }
+});
+
+function handleFile(file) {
+    selectedFile = file;
+    fileNameEl.textContent = file.name + ' (' + formatFileSize(file.size) + ')';
+    fileInfo.style.display = 'block';
+    diagnoseBtn.disabled = false;
+}
+
+clearBtn.addEventListener('click', () => {
+    selectedFile = null;
+    fileInput.value = '';
+    fileInfo.style.display = 'none';
+    diagnoseBtn.disabled = true;
+    document.getElementById('resultArea').style.display = 'none';
+});
+
+// 开始诊断
+diagnoseBtn.addEventListener('click', async () => {
+    if (!selectedFile) return;
+
+    showLoading('正在诊断，请稍候...');
+    diagnoseBtn.disabled = true;
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    try {
+        const result = await apiRequest('/api/diagnose/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (result.success && result.data) {
+            diagnoseResult = result.data;
+            displayResult(result.data);
+            showToast('诊断完成！', 'success');
+        } else {
+            showToast('诊断失败: ' + (result.error || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('诊断异常: ' + e.message, 'error');
+    } finally {
+        hideLoading();
+        diagnoseBtn.disabled = false;
+    }
+});
+
+// 显示诊断结果
+function displayResult(data) {
+    document.getElementById('resultArea').style.display = 'block';
+
+    // 基本信息
+    document.getElementById('resultFaultType').innerHTML = getFaultTag(data.diagnosis.fault_type);
+    document.getElementById('resultConfidence').textContent = (data.diagnosis.confidence * 100).toFixed(2) + '%';
+    document.getElementById('resultModel').textContent = data.diagnosis.model_used;
+    document.getElementById('resultSignalLength').textContent = data.signal_length + ' 点';
+    document.getElementById('resultSampleRate').textContent = data.sample_rate + ' Hz';
+
+    // 健康度仪表盘
+    const gauge = initChart('healthGauge');
+    gauge.setOption({
+        series: [{
+            type: 'gauge',
+            progress: { show: true, width: 18 },
+            axisLine: { lineStyle: { width: 18 } },
+            axisTick: { show: false },
+            splitLine: { length: 12, lineStyle: { width: 2, color: '#999' } },
+            axisLabel: { distance: 25, color: '#999', fontSize: 12 },
+            anchor: { show: true, showAbove: true, size: 20, itemStyle: { borderWidth: 5 } },
+            title: { show: true, offsetCenter: [0, '70%'], fontSize: 14, color: '#666' },
+            detail: {
+                valueAnimation: true,
+                fontSize: 32,
+                offsetCenter: [0, '40%'],
+                formatter: '{value}',
+                color: data.health.health_score >= 60 ? '#52c41a' : '#f5222d'
+            },
+            data: [{ value: Math.round(data.health.health_score), name: data.health.health_level }]
+        }]
+    });
+
+    // 波形图
+    const rawChart = initChart('rawWaveformChart');
+    rawChart.setOption({
+        tooltip: { trigger: 'axis' },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: data.visualization.raw_waveform.map((_, i) => i), show: false },
+        yAxis: { type: 'value', name: '幅值' },
+        series: [{ type: 'line', data: data.visualization.raw_waveform, lineStyle: { width: 1, color: '#1890ff' }, showSymbol: false, areaStyle: { opacity: 0.1 } }]
+    });
+
+    const procChart = initChart('processedWaveformChart');
+    procChart.setOption({
+        tooltip: { trigger: 'axis' },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: data.visualization.processed_waveform.map((_, i) => i), show: false },
+        yAxis: { type: 'value', name: '幅值' },
+        series: [{ type: 'line', data: data.visualization.processed_waveform, lineStyle: { width: 1, color: '#52c41a' }, showSymbol: false, areaStyle: { opacity: 0.1 } }]
+    });
+
+    // 频谱图
+    const specChart = initChart('spectrumChart');
+    specChart.setOption({
+        tooltip: { trigger: 'axis' },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', data: data.visualization.frequencies.map(f => f.toFixed(1)), name: '频率(Hz)' },
+        yAxis: { type: 'value', name: '幅值' },
+        series: [{ type: 'line', data: data.visualization.spectrum, lineStyle: { width: 1, color: '#722ed1' }, showSymbol: false, areaStyle: { opacity: 0.2 } }]
+    });
+
+    // 概率分布图
+    const probChart = initChart('probabilityChart');
+    const probs = data.diagnosis.class_probabilities;
+    probChart.setOption({
+        tooltip: { trigger: 'axis', formatter: '{b}: {c}%' },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'value', max: 100, name: '概率(%)' },
+        yAxis: { type: 'category', data: Object.keys(probs), axisLabel: { fontSize: 11 } },
+        series: [{
+            type: 'bar',
+            data: Object.values(probs).map(p => (p * 100).toFixed(2)),
+            itemStyle: { color: '#1890ff', borderRadius: [0, 4, 4, 0] },
+            label: { show: true, position: 'right', formatter: '{c}%' }
+        }]
+    });
+
+    // 特征值表格
+    const features = data.features.dict;
+    const featureNames = Object.keys(features);
+    const tbody = document.getElementById('featuresTableBody');
+    let html = '';
+    for (let i = 0; i < featureNames.length; i += 2) {
+        html += '<tr>';
+        html += `<td>${featureNames[i]}</td><td>${features[featureNames[i]].toFixed(6)}</td>`;
+        if (i + 1 < featureNames.length) {
+            html += `<td>${featureNames[i+1]}</td><td>${features[featureNames[i+1]].toFixed(6)}</td>`;
+        } else {
+            html += '<td>-</td><td>-</td>';
+        }
+        html += '</tr>';
+    }
+    tbody.innerHTML = html;
+}
+</script>
+{% endblock %}

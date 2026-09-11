@@ -17,6 +17,7 @@ def preprocess_data(file_path):
     # 2. 数据清洗
     # 删除缺失值
     df = df.dropna()
+
     # 简单去除异常值（超过3倍标准差的）
     df = df[(np.abs(df - df.mean()) <= (3 * df.std())).all(axis=1)]
 
