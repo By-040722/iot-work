@@ -1,0 +1,6 @@
+*.html linguist-vendored
+*.md linguist-documentation
+*.docx linguist-documentation
+*.pptx linguist-documentation
+*.bat linguist-vendored
+data/** linguist-vendored
